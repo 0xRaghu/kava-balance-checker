@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Kava Balance Checker
-Fetches the balance of a given 0x address on any specific day from the Kava blockchain.
+WKAVA ERC20 Balance Checker
+Fetches the balance of a given 0x address for WKAVA token on any specific day from the Kava blockchain.
 """
 
 import sys
@@ -64,19 +64,41 @@ class KavaRPCClient:
         block_hex = hex(block_number)
         return self._make_rpc_call("eth_getBlockByNumber", [block_hex, include_transactions])
     
-    def get_balance(self, address: str, block_number: int) -> int:
-        """Get balance in wei at a specific block."""
+    def call_contract(self, to_address: str, data: str, block_number: int) -> str:
+        """Make a contract call at a specific block."""
         block_hex = hex(block_number)
-        result = self._make_rpc_call("eth_getBalance", [address, block_hex])
-        return int(result, 16)
+        call_params = {
+            "to": to_address,
+            "data": data
+        }
+        return self._make_rpc_call("eth_call", [call_params, block_hex])
 
 
-class KavaBalanceChecker:
-    """Main class for checking balances on specific dates."""
+class WKAVABalanceChecker:
+    """Main class for checking WKAVA token balances on specific dates."""
+    
+    # WKAVA contract address on Kava
+    WKAVA_CONTRACT = "0xc86c7C0eFbd6A49B35E8714C5f59D99De09A225b"
     
     def __init__(self, rpc_url: str, address: str):
         self.rpc_client = KavaRPCClient(rpc_url)
         self.address = address
+    
+    def encode_balance_of_call(self, address: str) -> str:
+        """Encode balanceOf(address) function call."""
+        # balanceOf function selector: 0x70a08231
+        function_selector = "70a08231"
+        
+        # Remove 0x prefix from address and pad to 32 bytes
+        address_param = address[2:].lower().zfill(64)
+        
+        return "0x" + function_selector + address_param
+    
+    def decode_balance_result(self, result: str) -> int:
+        """Decode the balance result from contract call."""
+        if result == "0x":
+            return 0
+        return int(result, 16)
     
     def validate_date(self, date_str: str) -> datetime:
         """Validate and parse the date string."""
@@ -132,17 +154,23 @@ class KavaBalanceChecker:
         
         return result_block
     
-    def wei_to_kava(self, wei_amount: int) -> float:
-        """Convert wei to KAVA (18 decimal places)."""
+    def wei_to_wkava(self, wei_amount: int) -> float:
+        """Convert wei to WKAVA (18 decimal places)."""
         return wei_amount / (10 ** 18)
     
+    def get_wkava_balance(self, address: str, block_number: int) -> int:
+        """Get WKAVA balance at a specific block."""
+        call_data = self.encode_balance_of_call(address)
+        result = self.rpc_client.call_contract(self.WKAVA_CONTRACT, call_data, block_number)
+        return self.decode_balance_result(result)
+    
     def get_balance_on_date(self, date_str: str) -> dict:
-        """Get the balance of the address on the specified date."""
+        """Get the WKAVA balance of the address on the specified date."""
         # Validate date
         date_obj = self.validate_date(date_str)
         start_timestamp, end_timestamp = self.date_to_timestamps(date_obj)
         
-        print(f"Finding balance for {self.address} on {date_str}")
+        print(f"Finding WKAVA balance for {self.address} on {date_str}")
         print(f"Looking for last block before {end_timestamp} ({datetime.fromtimestamp(end_timestamp, tz=timezone.utc)})")
         
         # Find the last block of the day
@@ -156,9 +184,9 @@ class KavaBalanceChecker:
         block_timestamp = int(block_details["timestamp"], 16)
         block_datetime = datetime.fromtimestamp(block_timestamp, tz=timezone.utc)
         
-        # Get balance at that block
-        balance_wei = self.rpc_client.get_balance(self.address, last_block)
-        balance_kava = self.wei_to_kava(balance_wei)
+        # Get WKAVA balance at that block
+        balance_wei = self.get_wkava_balance(self.address, last_block)
+        balance_wkava = self.wei_to_wkava(balance_wei)
         
         return {
             "date": date_str,
@@ -167,34 +195,34 @@ class KavaBalanceChecker:
             "block_timestamp": block_timestamp,
             "block_datetime": block_datetime.strftime("%Y-%m-%d %H:%M:%S UTC"),
             "balance_wei": balance_wei,
-            "balance_kava": balance_kava
+            "balance_wkava": balance_wkava
         }
 
 
 def main():
-    """Main function to run the balance checker."""
+    """Main function to run the WKAVA balance checker."""
     if len(sys.argv) != 2:
-        print("Usage: python kava_balance_checker.py <date>")
+        print("Usage: python wkava_balance_checker.py <date>")
         print("Date format: YYYY-MM-DD (e.g., 2024-12-31)")
         sys.exit(1)
     
     # Configuration
     RPC_URL = "https://evm.data.kava.io"
-    ADDRESS = "0x7D5CEA2e5fBDFecca8CcfbFe85AC021C817a7f38"
+    ADDRESS = "0x7D5CEA2e5fBDFecca8CcfbFe85AC021C817a7f38"  # Same address as native KAVA checker
     
     date_input = sys.argv[1]
     
     try:
-        checker = KavaBalanceChecker(RPC_URL, ADDRESS)
+        checker = WKAVABalanceChecker(RPC_URL, ADDRESS)
         result = checker.get_balance_on_date(date_input)
         
         print("\n" + "="*60)
-        print(f"KAVA Balance Report for {result['address']}")
+        print(f"WKAVA Balance Report for {result['address']}")
         print("="*60)
         print(f"Date: {result['date']}")
         print(f"Block Number: {result['block_number']:,}")
         print(f"Block Timestamp: {result['block_datetime']}")
-        print(f"Balance: {result['balance_kava']:.6f} KAVA")
+        print(f"Balance: {result['balance_wkava']:.6f} WKAVA")
         print(f"Balance (wei): {result['balance_wei']:,}")
         print("="*60)
         
